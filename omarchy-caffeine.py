@@ -26,6 +26,7 @@ class OmarchyCaffeine:
         
         self.color = self.get_theme_color()
         self.ensure_icons()
+        self.timer_id = None
         
         # Check for stale state on reboot
         self.check_boot_state()
@@ -165,12 +166,32 @@ class OmarchyCaffeine:
         if active:
             item = Gtk.MenuItem(label="Stop")
             item.connect('activate', self.stop_caffeine)
+            menu.append(item)
         else:
             item = Gtk.MenuItem(label="Start")
             item.connect('activate', self.start_caffeine)
+            menu.append(item)
+
+            # Add Timer submenu
+            timer_item = Gtk.MenuItem(label="Timer")
+            timer_menu = Gtk.Menu()
             
-        menu.append(item)
-        
+            durations = [
+                ("15m", 15 * 60),
+                ("30m", 30 * 60),
+                ("1h", 60 * 60),
+                ("2h", 120 * 60),
+                ("6h", 360 * 60),
+            ]
+            
+            for label, seconds in durations:
+                mi = Gtk.MenuItem(label=label)
+                mi.connect('activate', lambda _, s=seconds, l=label: self.start_timer(s, l))
+                timer_menu.append(mi)
+            
+            timer_item.set_submenu(timer_menu)
+            menu.append(timer_item)
+            
         item_close = Gtk.MenuItem(label="Close")
         item_close.connect('activate', self.quit)
         menu.append(item_close)
@@ -178,7 +199,14 @@ class OmarchyCaffeine:
         menu.show_all()
         return menu
 
-    def start_caffeine(self, _):
+    def start_timer(self, seconds, label):
+        if self.timer_id is not None:
+            GLib.source_remove(self.timer_id)
+        
+        self.start_caffeine(None, duration=label)
+        self.timer_id = GLib.timeout_add_seconds(seconds, self.stop_caffeine, None)
+
+    def start_caffeine(self, _, duration=None):
         # 1. Save current hypridle state
         hypridle_running = subprocess.run(["pgrep", "-x", "hypridle"], 
                                         capture_output=True).returncode == 0
@@ -199,9 +227,15 @@ class OmarchyCaffeine:
         subprocess.run(["hyprctl", "dispatch", "dpms", "on"], stderr=subprocess.DEVNULL)
         
         self.update_state()
-        subprocess.run(["notify-send", "󰛟   Caffeine Enabled", "System will stay awake"])
+        
+        msg = f"System will stay awake for {duration}" if duration else "System will stay awake"
+        subprocess.run(["notify-send", "󰛟   Caffeine Enabled", msg])
 
     def stop_caffeine(self, _):
+        if self.timer_id is not None:
+            GLib.source_remove(self.timer_id)
+            self.timer_id = None
+
         # 1. Enable screensaver
         if os.path.exists(STATE_FILE):
             os.remove(STATE_FILE)
