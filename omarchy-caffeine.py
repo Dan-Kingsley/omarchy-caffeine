@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # Path configuration
 STATE_FILE = os.path.expanduser("~/.local/state/omarchy/toggles/screensaver-off")
+PREV_STATE_FILE = os.path.expanduser("~/.local/state/omarchy/toggles/screensaver-prev-state")
 ICON_DIR = os.path.expanduser("~/.cache/omarchy-caffeine/icons")
 FONT_PATH = "/usr/share/fonts/TTF/CaskaydiaMonoNerdFont-Regular.ttf"
 THEME_FILE = os.path.expanduser("~/.config/omarchy/current/theme/waybar.css")
@@ -26,6 +27,9 @@ class OmarchyCaffeine:
         self.color = self.get_theme_color()
         self.ensure_icons()
         
+        # Check for stale state on reboot
+        self.check_boot_state()
+        
         # Initial indicator setup
         self.indicator = AppIndicator3.Indicator.new(
             "omarchy-caffeine",
@@ -39,6 +43,49 @@ class OmarchyCaffeine:
         
         # Periodic check to sync with external changes
         GLib.timeout_add_seconds(2, self.update_state)
+
+    def check_boot_state(self):
+        """Check if we rebooted with caffeine on and restore state"""
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        boot_marker = os.path.join(runtime_dir, "omarchy-caffeine.lock")
+        
+        # If marker missing (fresh boot) but state file exists (stale)
+        if not os.path.exists(boot_marker) and os.path.exists(STATE_FILE):
+            print("Detected stale caffeine state after reboot. Reverting...")
+            
+            # Restore hypridle if it was supposed to be running
+            should_restore = True # Default to True for safety (consistent with stop_caffeine)
+            if os.path.exists(PREV_STATE_FILE):
+                try:
+                    with open(PREV_STATE_FILE, 'r') as f:
+                        should_restore = (f.read().strip() == "true")
+                    os.remove(PREV_STATE_FILE)
+                except Exception as e:
+                    print(f"Error reading prev state: {e}")
+            
+            # Only start if not already running
+            hypridle_running = subprocess.run(["pgrep", "-x", "hypridle"], 
+                                            capture_output=True).returncode == 0
+            
+            if should_restore and not hypridle_running:
+                print("Restoring hypridle...")
+                subprocess.Popen(["uwsm-app", "--", "hypridle"], 
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Remove the stale lock file
+            if os.path.exists(STATE_FILE):
+                os.remove(STATE_FILE)
+            
+            # Also clean up prev state file if it still exists (e.g. if reading failed)
+            if os.path.exists(PREV_STATE_FILE):
+                os.remove(PREV_STATE_FILE)
+            
+        # Create marker for this boot session
+        try:
+            with open(boot_marker, 'w') as f:
+                f.write(str(os.getpid()))
+        except Exception as e:
+            print(f"Could not create boot marker: {e}")
 
     def get_theme_color(self):
         """Try to extract @foreground color from omarchy theme"""
@@ -132,15 +179,23 @@ class OmarchyCaffeine:
         return menu
 
     def start_caffeine(self, _):
-        # 1. Disable screensaver via state file
+        # 1. Save current hypridle state
+        hypridle_running = subprocess.run(["pgrep", "-x", "hypridle"], 
+                                        capture_output=True).returncode == 0
+        
+        os.makedirs(os.path.dirname(PREV_STATE_FILE), exist_ok=True)
+        with open(PREV_STATE_FILE, 'w') as f:
+            f.write("true" if hypridle_running else "false")
+
+        # 2. Disable screensaver via state file
         os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
         with open(STATE_FILE, 'w') as f:
             pass
             
-        # 2. Stop hypridle (automated locking)
+        # 3. Stop hypridle (automated locking)
         subprocess.run(["pkill", "-x", "hypridle"], stderr=subprocess.DEVNULL)
         
-        # 3. Ensure screen is on
+        # 4. Ensure screen is on
         subprocess.run(["hyprctl", "dispatch", "dpms", "on"], stderr=subprocess.DEVNULL)
         
         self.update_state()
@@ -151,9 +206,22 @@ class OmarchyCaffeine:
         if os.path.exists(STATE_FILE):
             os.remove(STATE_FILE)
             
-        # 2. Restart hypridle
-        subprocess.Popen(["uwsm-app", "--", "hypridle"], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # 2. Check previous state and restart hypridle if needed
+        should_restart = True # Default to restarting if no state file found (safety)
+        
+        if os.path.exists(PREV_STATE_FILE):
+            try:
+                with open(PREV_STATE_FILE, 'r') as f:
+                    state = f.read().strip()
+                    should_restart = (state == "true")
+                os.remove(PREV_STATE_FILE)
+            except Exception as e:
+                print(f"Error reading previous state: {e}")
+        
+        if should_restart:
+            # Restart hypridle
+            subprocess.Popen(["uwsm-app", "--", "hypridle"], 
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         self.update_state()
         subprocess.run(["notify-send", "   Caffeine Disabled", "System will lock normally"])
