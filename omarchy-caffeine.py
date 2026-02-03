@@ -5,6 +5,7 @@ gi.require_version('AppIndicator3', '0.1')
 from gi.repository import Gtk, AppIndicator3, GLib
 import os
 import subprocess
+import json
 from PIL import Image, ImageDraw, ImageFont
 
 # Path configuration
@@ -50,36 +51,12 @@ class OmarchyCaffeine:
         runtime_dir = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
         boot_marker = os.path.join(runtime_dir, "omarchy-caffeine.lock")
         
-        # If marker missing (fresh boot) but state file exists (stale)
-        if not os.path.exists(boot_marker) and os.path.exists(STATE_FILE):
+        # If marker missing (fresh boot) AND prev state file exists
+        # This indicates we rebooted while Caffeine was active.
+        # We don't just check for STATE_FILE because that might be a manual toggle.
+        if not os.path.exists(boot_marker) and os.path.exists(PREV_STATE_FILE):
             print("Detected stale caffeine state after reboot. Reverting...")
-            
-            # Restore hypridle if it was supposed to be running
-            should_restore = True # Default to True for safety (consistent with stop_caffeine)
-            if os.path.exists(PREV_STATE_FILE):
-                try:
-                    with open(PREV_STATE_FILE, 'r') as f:
-                        should_restore = (f.read().strip() == "true")
-                    os.remove(PREV_STATE_FILE)
-                except Exception as e:
-                    print(f"Error reading prev state: {e}")
-            
-            # Only start if not already running
-            hypridle_running = subprocess.run(["pgrep", "-x", "hypridle"], 
-                                            capture_output=True).returncode == 0
-            
-            if should_restore and not hypridle_running:
-                print("Restoring hypridle...")
-                subprocess.Popen(["uwsm-app", "--", "hypridle"], 
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Remove the stale lock file
-            if os.path.exists(STATE_FILE):
-                os.remove(STATE_FILE)
-            
-            # Also clean up prev state file if it still exists (e.g. if reading failed)
-            if os.path.exists(PREV_STATE_FILE):
-                os.remove(PREV_STATE_FILE)
+            self.stop_caffeine(None)
             
         # Create marker for this boot session
         try:
@@ -207,18 +184,23 @@ class OmarchyCaffeine:
         self.timer_id = GLib.timeout_add_seconds(seconds, self.stop_caffeine, None)
 
     def start_caffeine(self, _, duration=None):
-        # 1. Save current hypridle state
+        # 1. Save current state
         hypridle_running = subprocess.run(["pgrep", "-x", "hypridle"], 
                                         capture_output=True).returncode == 0
+        state_file_existed = os.path.exists(STATE_FILE)
         
         os.makedirs(os.path.dirname(PREV_STATE_FILE), exist_ok=True)
         with open(PREV_STATE_FILE, 'w') as f:
-            f.write("true" if hypridle_running else "false")
+            json.dump({
+                "hypridle_running": hypridle_running,
+                "state_file_existed": state_file_existed
+            }, f)
 
         # 2. Disable screensaver via state file
         os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-        with open(STATE_FILE, 'w') as f:
-            pass
+        if not os.path.exists(STATE_FILE):
+            with open(STATE_FILE, 'w') as f:
+                pass
             
         # 3. Stop hypridle (automated locking)
         subprocess.run(["pkill", "-x", "hypridle"], stderr=subprocess.DEVNULL)
@@ -236,29 +218,41 @@ class OmarchyCaffeine:
             GLib.source_remove(self.timer_id)
             self.timer_id = None
 
-        # 1. Enable screensaver
-        if os.path.exists(STATE_FILE):
-            os.remove(STATE_FILE)
-            
-        # 2. Check previous state and restart hypridle if needed
-        should_restart = True # Default to restarting if no state file found (safety)
+        # 1. Default restore values (safety)
+        should_restart_hypridle = True 
+        should_exist_state_file = False
         
+        # 2. Check previous state
         if os.path.exists(PREV_STATE_FILE):
             try:
                 with open(PREV_STATE_FILE, 'r') as f:
-                    state = f.read().strip()
-                    should_restart = (state == "true")
+                    prev = json.load(f)
+                    should_restart_hypridle = prev.get("hypridle_running", True)
+                    should_exist_state_file = prev.get("state_file_existed", False)
                 os.remove(PREV_STATE_FILE)
             except Exception as e:
                 print(f"Error reading previous state: {e}")
-        
-        if should_restart:
-            # Restart hypridle
-            subprocess.Popen(["uwsm-app", "--", "hypridle"], 
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # 3. Restore screensaver state file
+        if should_exist_state_file:
+            if not os.path.exists(STATE_FILE):
+                os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+                with open(STATE_FILE, 'w') as f: pass
+        else:
+            if os.path.exists(STATE_FILE):
+                os.remove(STATE_FILE)
+            
+        # 4. Restore hypridle
+        if should_restart_hypridle:
+            # Only start if not already running
+            hypridle_running = subprocess.run(["pgrep", "-x", "hypridle"], 
+                                            capture_output=True).returncode == 0
+            if not hypridle_running:
+                subprocess.Popen(["uwsm-app", "--", "hypridle"], 
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         self.update_state()
-        subprocess.run(["notify-send", "   Caffeine Disabled", "System will lock normally"])
+        subprocess.run(["notify-send", "   Caffeine Disabled", "System will lock normally" if not should_exist_state_file else "Screensaver remains disabled"])
 
     def quit(self, _):
         Gtk.main_quit()
