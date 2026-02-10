@@ -6,6 +6,7 @@ from gi.repository import Gtk, AppIndicator3, GLib
 import os
 import subprocess
 import json
+import time
 from PIL import Image, ImageDraw, ImageFont
 
 # Path configuration
@@ -28,6 +29,7 @@ class OmarchyCaffeine:
         self.color = self.get_theme_color()
         self.ensure_icons()
         self.timer_id = None
+        self.timer_end_time = None
         
         # Check for stale state on reboot
         self.check_boot_state()
@@ -144,6 +146,23 @@ class OmarchyCaffeine:
             item = Gtk.MenuItem(label="Stop")
             item.connect('activate', self.stop_caffeine)
             menu.append(item)
+
+            if self.timer_end_time:
+                remaining = int(self.timer_end_time - time.time())
+                if remaining > 0:
+                    if remaining >= 3600:
+                        h = remaining // 3600
+                        m = (remaining % 3600) // 60
+                        s = remaining % 60
+                        time_str = f"{h:02d}:{m:02d}:{s:02d}"
+                    else:
+                        m = remaining // 60
+                        s = remaining % 60
+                        time_str = f"{m:02d}:{s:02d}"
+                    
+                    time_item = Gtk.MenuItem(label=f"Time left: {time_str}")
+                    time_item.set_sensitive(False)
+                    menu.append(time_item)
         else:
             item = Gtk.MenuItem(label="Start")
             item.connect('activate', self.start_caffeine)
@@ -181,6 +200,7 @@ class OmarchyCaffeine:
             GLib.source_remove(self.timer_id)
         
         self.start_caffeine(None, duration=label)
+        self.timer_end_time = time.time() + seconds
         self.timer_id = GLib.timeout_add_seconds(seconds, self.stop_caffeine, None)
 
     def start_caffeine(self, _, duration=None):
@@ -217,6 +237,8 @@ class OmarchyCaffeine:
         if self.timer_id is not None:
             GLib.source_remove(self.timer_id)
             self.timer_id = None
+        
+        self.timer_end_time = None
 
         # 1. Default restore values (safety)
         should_restart_hypridle = True 
