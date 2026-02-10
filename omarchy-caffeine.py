@@ -168,10 +168,6 @@ class OmarchyCaffeine:
             item.connect('activate', self.start_caffeine)
             menu.append(item)
 
-            # Add Timer submenu
-            timer_item = Gtk.MenuItem(label="Timer")
-            timer_menu = Gtk.Menu()
-            
             durations = [
                 ("15m", 15 * 60),
                 ("30m", 30 * 60),
@@ -183,10 +179,7 @@ class OmarchyCaffeine:
             for label, seconds in durations:
                 mi = Gtk.MenuItem(label=label)
                 mi.connect('activate', lambda _, s=seconds, l=label: self.start_timer(s, l))
-                timer_menu.append(mi)
-            
-            timer_item.set_submenu(timer_menu)
-            menu.append(timer_item)
+                menu.append(mi)
             
         item_close = Gtk.MenuItem(label="Close")
         item_close.connect('activate', self.quit)
