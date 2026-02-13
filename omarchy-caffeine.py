@@ -224,7 +224,7 @@ class OmarchyCaffeine:
         self.update_state()
         
         msg = f"System will stay awake for {duration}" if duration else "System will stay awake"
-        subprocess.run(["notify-send", "󰛟   Caffeine Enabled", msg])
+        subprocess.run(["notify-send", "-i", self.icon_full, "Caffeine Enabled", msg])
 
     def stop_caffeine(self, _):
         if self.timer_id is not None:
@@ -267,7 +267,7 @@ class OmarchyCaffeine:
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         self.update_state()
-        subprocess.run(["notify-send", "   Caffeine Disabled", "System will lock normally" if not should_exist_state_file else "Screensaver remains disabled"])
+        subprocess.run(["notify-send", "-i", self.icon_empty, "Caffeine Disabled", "System will lock normally" if not should_exist_state_file else "Screensaver remains disabled"])
 
     def quit(self, _):
         Gtk.main_quit()
