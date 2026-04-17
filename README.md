@@ -12,7 +12,7 @@ A system tray application for Omarchy (Wayland/Hyprland) that keeps your system 
   - **Full Cup (Active)**: Caffeine is enabled. Screensaver and idle locking are disabled.
   - **Faded Cup (Inactive)**: Normal system behavior.
 - **Automated Control**:
-  - Disables `hypridle` to prevent automated screen locking and DPMS (screen off).
+  - Uses Wayland idle-inhibit protocol (same as video players) to prevent screen from dimming/locking.
   - Manages Omarchy's internal screensaver toggle state.
   - Ensures the display stays on when activated.
 - **Smart Theming**: Reads `@foreground` from `~/.config/omarchy/current/theme/waybar.css` to ensure icons match your desktop style perfectly.
