@@ -148,13 +148,8 @@ class OmarchyCaffeine(Gtk.Application):
         image.save(path)
 
     def is_active(self):
-        # Active if screensaver-off file exists AND hypridle is NOT running
-        screensaver_off = os.path.exists(STATE_FILE)
-        hypridle_running = (
-            subprocess.run(["pgrep", "-x", "hypridle"], capture_output=True).returncode
-            == 0
-        )
-        return screensaver_off and not hypridle_running
+        # Active if screensaver-off file exists
+        return os.path.exists(STATE_FILE)
 
     def update_state(self):
         active = self.is_active()
