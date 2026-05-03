@@ -47,9 +47,6 @@ class OmarchyCaffeine(Gtk.Application):
         self.color = self.get_theme_color()
         self.ensure_icons()
 
-        # Check for stale state on reboot
-        self.check_boot_state()
-
         # Initial indicator setup
         self.indicator = AppIndicator3.Indicator.new(
             "omarchy-caffeine",
@@ -57,6 +54,9 @@ class OmarchyCaffeine(Gtk.Application):
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+
+        # Check for stale state on reboot
+        self.check_boot_state()
 
         # Initial state update
         self.update_state()
@@ -152,6 +152,9 @@ class OmarchyCaffeine(Gtk.Application):
         return os.path.exists(STATE_FILE)
 
     def update_state(self):
+        if self.indicator is None:
+            return True
+
         active = self.is_active()
         if active:
             self.indicator.set_icon_full(self.icon_full, "Caffeine Active")
