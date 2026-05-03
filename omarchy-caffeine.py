@@ -38,6 +38,7 @@ class OmarchyCaffeine(Gtk.Application):
         self.color = None
         self.icon_empty = None
         self.icon_full = None
+        self.theme_mtime = None
 
     def do_activate(self):
         os.makedirs(ICON_DIR, exist_ok=True)
@@ -46,6 +47,12 @@ class OmarchyCaffeine(Gtk.Application):
 
         self.color = self.get_theme_color()
         self.ensure_icons()
+        self.theme_mtime = self.get_theme_mtime()
+
+        # Set up theme file monitoring for real-time icon color updates
+        theme_file = Gio.File.new_for_path(THEME_FILE)
+        self.theme_monitor = theme_file.monitor(Gio.FileMonitorFlags.NONE, None)
+        self.theme_monitor.connect("changed", self.on_theme_changed)
 
         # Initial indicator setup
         self.indicator = AppIndicator3.Indicator.new(
@@ -146,6 +153,24 @@ class OmarchyCaffeine(Gtk.Application):
         )
 
         image.save(path)
+
+    def get_theme_mtime(self):
+        """Get the modification time of the theme file"""
+        try:
+            return os.path.getmtime(THEME_FILE)
+        except OSError:
+            return None
+
+    def on_theme_changed(self, monitor, file, other_file, event_type):
+        """Handle theme file changes"""
+        if event_type in (Gio.FileMonitorEvent.CHANGED, Gio.FileMonitorEvent.CREATED):
+            new_mtime = self.get_theme_mtime()
+            if new_mtime != self.theme_mtime:
+                self.theme_mtime = new_mtime
+                print("Theme file changed, updating icon color...")
+                self.color = self.get_theme_color()
+                self.ensure_icons()
+                self.update_state()
 
     def is_active(self):
         # Active if screensaver-off file exists
